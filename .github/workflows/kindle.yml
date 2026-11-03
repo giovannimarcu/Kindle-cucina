@@ -1,0 +1,53 @@
+name: kindle
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dipendenze
+        run: |
+          pip install pillow
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core
+
+      - name: Genera immagine
+        run: python3 generate.py site
+
+      - name: Tieni vivo il repository (un commit al mese)
+        if: github.event_name == 'schedule'
+        run: |
+          date -u +%Y-%m > keepalive.txt
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add keepalive.txt
+          git diff --cached --quiet || (git commit -m "keepalive" && git push)
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
