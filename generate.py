@@ -11,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json")))
 TZ = ZoneInfo(CFG["timezone"])
 UA = {"User-Agent": "kindle-cucina/1.0 (uso personale)"}
+DBG = {"voli": ""}
 
 GIORNI = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"]
 MESI = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"]
@@ -72,8 +73,12 @@ def flights():
         data = get_json("https://api.adsb.lol/v2/point/%s/%s/%d" % (ap["lat"], ap["lon"], CFG["radius_nm"]))
     except Exception as e:
         print("voli non disponibili:", e)
+        DBG["voli"] = "voli err: %s" % str(e)[:40]
         return None
+    if "ac" not in data:
+        DBG["voli"] = "risposta senza ac: %s" % str(data)[:60]
     out = []
+    tot = len(data.get("ac", []))
     for a in data.get("ac", []):
         call = (a.get("flight") or "").strip()
         alt = a.get("alt_baro")
@@ -84,7 +89,7 @@ def flights():
             continue
         brg = bearing(a["lat"], a["lon"], ap["lat"], ap["lon"])
         diff = abs((trk - brg + 180) % 360 - 180)
-        if diff > 50:  # non sta puntando verso l'aeroporto
+        if diff > 65:  # non sta puntando verso l'aeroporto
             continue
         out.append({"flight": call, "alt": int(alt), "eta": max(1, round(dst / gs * 60)), "dst": dst})
     out.sort(key=lambda x: x["eta"])
@@ -101,6 +106,8 @@ def flights():
             pass  # rotta sconosciuta: lo mostriamo comunque se punta all'aeroporto
         if ok:
             res.append({"flight": f["flight"], "city": city, "iata": iata, "eta": f["eta"], "alt": f["alt"]})
+    if "ac" in data:
+        DBG["voli"] = "aerei %d, verso Orio %d, confermati %d" % (tot, len(out), len(res))
     return res[:6]
 
 
@@ -217,6 +224,8 @@ def render(wx, fl, now):
     # piede
     hline(d, 975, w=2)
     text(d, (W / 2, 990), "aggiornato %02d:%02d" % (now.hour, now.minute), font(20), fill=90, anchor="ma")
+    if DBG["voli"]:
+        text(d, (W / 2, 1006), DBG["voli"], font(14), fill=120, anchor="ma")
     return im.resize((W, H), Image.LANCZOS)
 
 
