@@ -63,12 +63,21 @@ def bearing(lat1, lon1, lat2, lon2):
     return (math.degrees(math.atan2(y, x)) + 360) % 360
 
 
+def dist_nm(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = (math.sin((p2 - p1) / 2) ** 2 +
+         math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2)
+    return 2 * 3440.065 * math.asin(math.sqrt(a))
+
+
 def flights():
     ap = CFG["airport"]
+    mode = CFG.get("mode", "partenze")
     if os.environ.get("DEMO"):
-        return [{"flight": "RYR4821", "city": "Londra", "iata": "STN", "eta": 4, "alt": 2300},
-                {"flight": "WZZ5113", "city": "Bucarest", "iata": "OTP", "eta": 9, "alt": 4800},
-                {"flight": "EZY2204", "city": "Parigi", "iata": "CDG", "eta": 17, "alt": 7900}]
+        base = [{"flight": "RYR4821", "city": "Londra", "iata": "STN", "alt": 2300, "casa": True},
+                {"flight": "WZZ5113", "city": "Bucarest", "iata": "OTP", "alt": 4800, "casa": False},
+                {"flight": "EZY2204", "city": "Parigi", "iata": "CDG", "alt": 7900, "casa": False}]
+        return base
     try:
         data = get_json("https://api.adsb.lol/v2/point/%s/%s/%d" % (ap["lat"], ap["lon"], CFG["radius_nm"]))
     except Exception as e:
@@ -77,37 +86,55 @@ def flights():
         return None
     if "ac" not in data:
         DBG["voli"] = "risposta senza ac: %s" % str(data)[:60]
-    out = []
     tot = len(data.get("ac", []))
+    cand = []
     for a in data.get("ac", []):
         call = (a.get("flight") or "").strip()
         alt = a.get("alt_baro")
-        if not call or not isinstance(alt, (int, float)) or alt > 10000:
+        if not call or not isinstance(alt, (int, float)) or alt > 12000:
+            continue
+        if a.get("category") == "A7":  # elicotteri
             continue
         gs, trk, dst = a.get("gs"), a.get("track"), a.get("dst")
-        if gs is None or trk is None or dst is None or gs < 60:
+        if gs is None or trk is None or dst is None or gs < 90:
             continue
         brg = bearing(a["lat"], a["lon"], ap["lat"], ap["lon"])
-        diff = abs((trk - brg + 180) % 360 - 180)
-        if diff > 65:  # non sta puntando verso l'aeroporto
-            continue
-        out.append({"flight": call, "alt": int(alt), "eta": max(1, round(dst / gs * 60)), "dst": dst})
-    out.sort(key=lambda x: x["eta"])
+        diff = abs((trk - brg + 180) % 360 - 180)  # 0 = verso l'aeroporto, 180 = si allontana
+        rate = a.get("baro_rate", a.get("geom_rate", 0)) or 0
+        if mode == "arrivi":
+            if diff > 65 or alt > 10000:
+                continue
+        else:
+            # partenza: si allontana, sale (o e' ancora bassa), non troppo lontano
+            if diff < 100 or dst > 25 or not (rate > 300 or alt < 3000):
+                continue
+        casa = dist_nm(a["lat"], a["lon"], CFG["lat"], CFG["lon"]) <= CFG.get("casa_nm", 2.5)
+        cand.append({"flight": call, "alt": int(alt), "dst": dst, "gs": gs, "casa": casa})
+    cand.sort(key=lambda x: x["dst"])
     res = []
-    for f in out[:8]:
+    for f in cand[:8]:
         city, iata, ok = "?", "", True
+        forte = f["alt"] <= 6000 and f["dst"] <= 15
         try:
             r = get_json("https://api.adsbdb.com/v0/callsign/" + f["flight"], timeout=10)
             fr = r["response"]["flightroute"]
-            if fr["destination"]["icao_code"] != ap["icao"]:
-                ok = False  # va altrove (es. sorvolo)
-            city, iata = fr["origin"]["municipality"], fr["origin"]["iata_code"]
+            if mode == "arrivi":
+                if fr["destination"]["icao_code"] == ap["icao"]:
+                    city, iata = fr["origin"]["municipality"], fr["origin"]["iata_code"]
+                elif not forte:
+                    ok = False
+            else:
+                if fr["origin"]["icao_code"] == ap["icao"]:
+                    city, iata = fr["destination"]["municipality"], fr["destination"]["iata_code"]
+                elif not forte:
+                    ok = False
         except Exception:
-            pass  # rotta sconosciuta: lo mostriamo comunque se punta all'aeroporto
+            pass
         if ok:
-            res.append({"flight": f["flight"], "city": city, "iata": iata, "eta": f["eta"], "alt": f["alt"]})
+            res.append({"flight": f["flight"], "city": city, "iata": iata, "alt": f["alt"], "casa": f["casa"]})
     if "ac" in data:
-        DBG["voli"] = "aerei %d, verso Orio %d, confermati %d" % (tot, len(out), len(res))
+        DBG["voli"] = "aerei %d, candidati %d, mostrati %d" % (tot, len(cand), len(res))
+    res.sort(key=lambda x: (not x["casa"]))  # prima quelli sopra casa
     return res[:6]
 
 
@@ -207,25 +234,30 @@ def render(wx, fl, now):
         text(d, (30, 200), "Meteo non disponibile", font(36))
     hline(d, 610, w=4)
     # voli
-    text(d, (30, 628), "In arrivo a %s" % CFG["airport"]["name"], font(30, True))
+    mode = CFG.get("mode", "partenze")
+    titolo = ("Partenze da %s" if mode != "arrivi" else "In arrivo a %s") % CFG["airport"]["name"]
+    text(d, (30, 628), titolo, font(30, True))
     y = 685
     if fl is None:
         text(d, (30, y), "Dati voli non disponibili", font(28), fill=70)
     elif not fl:
-        text(d, (30, y), "Nessun volo in arrivo adesso", font(28), fill=70)
+        text(d, (30, y), "Nessun volo adesso", font(28), fill=70)
     else:
         for f in fl[:6]:
             text(d, (30, y), f["flight"], font(26, True))
-            citta = (f["city"] or "?")[:16] + ((" (%s)" % f["iata"]) if f["iata"] else "")
+            citta = (f["city"] or "?")[:15] + ((" (%s)" % f["iata"]) if f["iata"] else "")
             text(d, (230, y), citta, font(26))
-            text(d, (W - 30, y), "%d min" % f["eta"], font(26, True), anchor="ra")
-            hline(d, y + 46, w=1, fill=150)
-            y += 54
+            quota = "%s m" % format(int(round(f["alt"] * 0.3048 / 100.0) * 100), ",").replace(",", ".")
+            text(d, (W - 30, y), quota, font(26, True), anchor="ra")
+            if f.get("casa"):
+                text(d, (230, y + 28), "sopra casa", font(16, True), fill=60)
+            hline(d, y + 52, w=1, fill=150)
+            y += 60
     # piede
     hline(d, 975, w=2)
-    text(d, (W / 2, 990), "aggiornato %02d:%02d" % (now.hour, now.minute), font(20), fill=90, anchor="ma")
+    text(d, (W / 2, 982), "aggiornato %02d:%02d" % (now.hour, now.minute), font(20), fill=90, anchor="ma")
     if DBG["voli"]:
-        text(d, (W / 2, 1006), DBG["voli"], font(14), fill=120, anchor="ma")
+        text(d, (W / 2, 1008), DBG["voli"], font(14), fill=120, anchor="ma")
     return im.resize((W, H), Image.LANCZOS)
 
 

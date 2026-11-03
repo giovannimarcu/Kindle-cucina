@@ -9,5 +9,7 @@
     "lat": 45.6739,
     "lon": 9.7042
   },
-  "radius_nm": 30
+  "radius_nm": 30,
+  "mode": "partenze",
+  "casa_nm": 2.5
 }
