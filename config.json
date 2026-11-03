@@ -1,0 +1,13 @@
+{
+  "place": "Treviglio",
+  "lat": 45.52,
+  "lon": 9.59,
+  "timezone": "Europe/Rome",
+  "airport": {
+    "name": "Orio al Serio",
+    "icao": "LIME",
+    "lat": 45.6739,
+    "lon": 9.7042
+  },
+  "radius_nm": 30
+}
