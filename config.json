@@ -12,5 +12,6 @@
  "radius_nm": 30,
  "mode": "partenze",
  "casa_nm": 2.5,
- "test_tabellone": true
+ "test_tabellone": true,
+ "stazione_id": "S01708"
 }

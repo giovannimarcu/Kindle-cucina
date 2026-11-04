@@ -79,6 +79,49 @@ def ore_pioggia(wx, now):
     return "Pioggia " + " e ".join(pezzi)
 
 
+# ---------------- treni ----------------
+def treni():
+    """Prossime partenze da Treviglio (ViaggiaTreno). None se non disponibile."""
+    if os.environ.get("DEMO"):
+        base = datetime.now(TZ)
+        demo = [("REG", "BRESCIA", 5, "5", 0), ("S", "MILANO PORTA GARIBALDI", 17, "1", 0),
+                ("REG", "MILANO CENTRALE", 24, "2", 6), ("RV", "VERONA PORTA NUOVA", 33, "4", 0), ("REG", "BERGAMO", 41, "3", 0)]
+        r = []
+        for cat, dest, m, b, rit in demo:
+            r.append({"ora": "%02d:%02d" % ((base.hour + (base.minute + m) // 60) % 24, (base.minute + m) % 60),
+                      "cat": cat, "dest": dest, "bin": b, "rit": rit, "sopp": False})
+        return r
+    sid = CFG.get("stazione_id", "S01708")
+    quando = datetime.now(TZ)
+    q = urllib.request.quote(quando.strftime("%a %b %d %Y %H:%M:%S GMT%z"))
+    url = "https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno/partenze/%s/%s" % (sid, q)
+    try:
+        dati = get_json(url, timeout=25)
+    except Exception as e:
+        print("treni non disponibili:", e)
+        return None
+    if not isinstance(dati, list):
+        return None
+    adesso_ms = quando.timestamp() * 1000
+    out = []
+    for t in dati:
+        try:
+            ms = t.get("orarioPartenza")
+            if ms is None or ms < adesso_ms - 60000:
+                continue
+            ora = datetime.fromtimestamp(ms / 1000, TZ)
+            bin_ = (t.get("binarioEffettivoPartenzaDescrizione") or t.get("binarioProgrammatoPartenzaDescrizione") or "").strip()
+            out.append({"ms": ms, "ora": "%02d:%02d" % (ora.hour, ora.minute),
+                        "cat": (t.get("categoria") or t.get("categoriaDescrizione") or "").strip(),
+                        "dest": (t.get("destinazione") or "?").strip(),
+                        "bin": bin_, "rit": int(t.get("ritardo") or 0),
+                        "sopp": t.get("provvedimento") == 1})
+        except Exception:
+            continue
+    out.sort(key=lambda x: x["ms"])
+    return out
+
+
 def desc(code):
     if code == 0: return "Sereno", "sun"
     if code in (1, 2): return "Poco nuvoloso", "partly"
@@ -239,7 +282,7 @@ def hline(d, y, x0=30, x1=W - 30, w=2, fill=0):
     d.line([x0 * S, y * S, x1 * S, y * S], fill=fill, width=int(w * S))
 
 
-def render(wx, fl, now):
+def render(wx, tr, now):
     im = Image.new("L", (W * S, H * S), 255)
     d = ImageDraw.Draw(im)
     # intestazione
@@ -275,9 +318,31 @@ def render(wx, fl, now):
     else:
         text(d, (30, 200), "Meteo non disponibile", font(36))
     hline(d, 645, w=4)
-    # treni (segnaposto, in preparazione)
-    text(d, (30, 665), "Treni da Treviglio Centrale", font(30, True))
-    text(d, (30, 720), "In preparazione", font(28), fill=90)
+    # treni
+    text(d, (30, 662), "Treni da Treviglio", font(30, True))
+    y = 712
+    if tr is None:
+        text(d, (30, y), "Dati treni non disponibili", font(28), fill=70)
+    elif not tr:
+        text(d, (30, y), "Nessun treno in partenza", font(28), fill=70)
+    else:
+        for t in tr[:5]:
+            text(d, (30, y), t["ora"], font(30, True))
+            dest = t["dest"].title()
+            dest = dest if len(dest) <= 19 else dest[:18] + "."
+            text(d, (140, y), dest, font(28))
+            if t["sopp"]:
+                text(d, (W - 30, y + 2), "SOPPRESSO", font(24, True), anchor="ra")
+            elif t["bin"]:
+                text(d, (W - 30, y + 2), "binario %s" % t["bin"], font(26, True), anchor="ra")
+            nota = t["cat"]
+            if t["rit"] > 0:
+                nota += ("   " if nota else "") + "ritardo %d min" % t["rit"]
+            elif not t["sopp"]:
+                nota += ("   " if nota else "") + "in orario"
+            text(d, (140, y + 32), nota, font(18), fill=70)
+            hline(d, y + 56, w=1, fill=150)
+            y += 60
     return im.resize((W, H), Image.LANCZOS)
 
 
@@ -335,7 +400,7 @@ def probe_treni(out):
         try:
             st, body = prendi(base + "partenze/%s/%s" % (sid, urllib.request.quote(quando)))
             righe.append("== partenze %s stato %s lunghezza %d" % (sid, st, len(body)))
-            righe.append(body[:2500])
+            righe.append(body[:6000])
         except Exception as e:
             righe.append("== partenze %s ERRORE %r" % (sid, e))
     os.makedirs(out, exist_ok=True)
@@ -347,7 +412,7 @@ def main():
     out = sys.argv[1] if len(sys.argv) > 1 else HERE
     os.makedirs(out, exist_ok=True)
     now = datetime.now(TZ)
-    im = render(weather(), None, now).convert("L")
+    im = render(weather(), treni(), now).convert("L")
     # solo grigi 8 bit, nessun canale alpha
     path = os.path.join(out, "kindle.png")
     im.save(path, optimize=True)
@@ -356,7 +421,6 @@ def main():
     print("ok", path, chk.size, chk.mode)
     try:
         if json.load(open(os.path.join(HERE, "config.json"))).get("test_tabellone"):
-            probe_tabellone(out)
             probe_treni(out)
     except Exception as e:
         print("probe errore", e)
