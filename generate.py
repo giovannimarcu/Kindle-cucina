@@ -310,6 +310,8 @@ def render(wx, tr, now):
             x0 = 30 + i * colw
             label = "Oggi" if i == 0 else GIORNI[datetime.fromisoformat(dd["time"][i]).weekday()].capitalize()
             _, kd = desc(dd["weather_code"][i])
+            if kd in ("rain", "storm") and (dd["precipitation_probability_max"][i] or 0) < 40:
+                kd = "cloud"
             text(d, (x0 + colw / 2, 430), label, font(26, True), anchor="ma")
             icon(d, kd, x0 + colw / 2, 505, 36)
             text(d, (x0 + colw / 2, 560), "%d° / %d°" % (round(dd["temperature_2m_max"][i]), round(dd["temperature_2m_min"][i])),
