@@ -58,7 +58,8 @@ def ore_pioggia(wx, now):
         dt = datetime.fromisoformat(t)
         if adesso <= dt < adesso.replace(hour=0) + __import__("datetime").timedelta(days=2):
             if (dt - adesso).total_seconds() <= 24 * 3600:
-                ore.append((dt, (p or 0) >= 40 or (mm or 0) >= 0.3))
+                ora_ora = (dt == adesso) and desc(wx["current"]["weather_code"])[1] in ("rain", "storm")
+                ore.append((dt, ora_ora or (p or 0) >= 40 or (mm or 0) >= 0.3))
     fasce, cur = [], None
     for dt, pioggia in ore:
         if pioggia and cur is None:
@@ -75,7 +76,10 @@ def ore_pioggia(wx, now):
     for a, b in fasce[:2]:
         fine = b.hour + 1
         giorno = "" if a.date() == adesso.date() else "domani "
-        pezzi.append("%sdalle %d alle %d" % (giorno, a.hour, fine % 24 if fine != 24 else 24))
+        if a == adesso:
+            pezzi.append("adesso fino alle %d" % (fine % 24 if fine != 24 else 24))
+        else:
+            pezzi.append("%sdalle %d alle %d" % (giorno, a.hour, fine % 24 if fine != 24 else 24))
     return "Pioggia " + " e ".join(pezzi)
 
 
