@@ -373,7 +373,7 @@ def render(wx, tr, now, bo=None):
     hline(d, 563, w=4)
     # treni
     text(d, (30, 578), "Treni da Treviglio", font(30, True))
-    y = 626
+    y = 620
     if tr is None:
         text(d, (30, y), "Dati treni non disponibili", font(28), fill=70)
     elif not tr:
@@ -394,25 +394,25 @@ def render(wx, tr, now, bo=None):
             elif not t["sopp"]:
                 nota += ("   " if nota else "") + "in orario"
             text(d, (140, y + 32), nota, font(18), fill=70)
-            hline(d, y + 54, w=1, fill=150) if t is not tr[:5][-1] else None
-            y += 58
+            hline(d, y + 50, w=1, fill=150) if t is not tr[:5][-1] else None
+            y += 54
     # borsa
     if bo:
-        hline(d, 918, w=4)
+        hline(d, 894, w=4)
         colw = (W - 60) / len(bo)
         for i, o in enumerate(bo):
             nome, val, var = o[0], o[1], o[2]
             dec = o[3] if len(o) > 3 else 0
             cx = 30 + i * colw + colw / 2
-            text(d, (cx, 928), nome, font(24, True), anchor="ma")
+            text(d, (cx, 904), nome, font(24, True), anchor="ma")
             if val is None:
-                text(d, (cx, 970), "n.d.", font(30), fill=90, anchor="ma")
+                text(d, (cx, 946), "n.d.", font(30), fill=90, anchor="ma")
             else:
                 v = ("{:,.%df}" % dec).format(val)
                 v = v.replace(",", "X").replace(".", ",").replace("X", ".")
                 freccia = "+" if var >= 0 else "-"
-                text(d, (cx, 958), v, font(32), anchor="ma")
-                text(d, (cx, 992), ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ","), font(28, True), anchor="ma")
+                text(d, (cx, 934), v, font(32), anchor="ma")
+                text(d, (cx, 970), ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ","), font(28, True), anchor="ma")
     return im.resize((W, H), Image.LANCZOS)
 
 
