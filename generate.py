@@ -346,14 +346,14 @@ def render(wx, tr, now, bo=None):
     if wx:
         c = wx["current"]
         name, kind = desc(c["weather_code"])
-        icon(d, kind, 150, 225, 85)
-        text(d, (300, 130), "%d°" % round(c["temperature_2m"]), font(140, True))
-        text(d, (300, 295), name, font(36))
-        text(d, (30, 345), "percepita %d°   vento %d km/h" % (round(c.get("apparent_temperature", c["temperature_2m"])),
+        icon(d, kind, 150, 195, 70)
+        text(d, (300, 112), "%d°" % round(c["temperature_2m"]), font(120, True))
+        text(d, (300, 252), name, font(34))
+        text(d, (30, 300), "percepita %d°   vento %d km/h" % (round(c.get("apparent_temperature", c["temperature_2m"])),
                                                               round(c.get("wind_speed_10m", 0))), font(24), fill=60)
         rp = ore_pioggia(wx, now)
         if rp:
-            text(d, (30, 378), rp, font(26, True))
+            text(d, (30, 334), rp, font(26, True))
         # prossimi giorni
         dd = wx["daily"]
         colw = (W - 60) / 3
@@ -363,23 +363,23 @@ def render(wx, tr, now, bo=None):
             _, kd = desc(dd["weather_code"][i])
             if kd in ("rain", "storm") and (dd["precipitation_probability_max"][i] or 0) < 40:
                 kd = "cloud"
-            text(d, (x0 + colw / 2, 430), label, font(26, True), anchor="ma")
-            icon(d, kd, x0 + colw / 2, 505, 36)
-            text(d, (x0 + colw / 2, 560), "%d° / %d°" % (round(dd["temperature_2m_max"][i]), round(dd["temperature_2m_min"][i])),
+            text(d, (x0 + colw / 2, 382), label, font(26, True), anchor="ma")
+            icon(d, kd, x0 + colw / 2, 445, 32)
+            text(d, (x0 + colw / 2, 489), "%d° / %d°" % (round(dd["temperature_2m_max"][i]), round(dd["temperature_2m_min"][i])),
                  font(26), anchor="ma")
-            text(d, (x0 + colw / 2, 595), "pioggia %d%%" % (dd["precipitation_probability_max"][i] or 0), font(20), fill=70, anchor="ma")
+            text(d, (x0 + colw / 2, 523), "pioggia %d%%" % (dd["precipitation_probability_max"][i] or 0), font(20), fill=70, anchor="ma")
     else:
         text(d, (30, 200), "Meteo non disponibile", font(36))
-    hline(d, 645, w=4)
+    hline(d, 563, w=4)
     # treni
-    text(d, (30, 662), "Treni da Treviglio", font(30, True))
-    y = 706
+    text(d, (30, 578), "Treni da Treviglio", font(30, True))
+    y = 626
     if tr is None:
         text(d, (30, y), "Dati treni non disponibili", font(28), fill=70)
     elif not tr:
         text(d, (30, y), "Nessun treno in partenza", font(28), fill=70)
     else:
-        for t in tr[:4]:
+        for t in tr[:5]:
             text(d, (30, y), t["ora"], font(30, True))
             dest = t["dest"].title()
             dest = dest if len(dest) <= 19 else dest[:18] + "."
@@ -394,25 +394,25 @@ def render(wx, tr, now, bo=None):
             elif not t["sopp"]:
                 nota += ("   " if nota else "") + "in orario"
             text(d, (140, y + 32), nota, font(18), fill=70)
-            hline(d, y + 54, w=1, fill=150)
+            hline(d, y + 54, w=1, fill=150) if t is not tr[:5][-1] else None
             y += 58
     # borsa
     if bo:
-        hline(d, 944, w=4)
+        hline(d, 918, w=4)
         colw = (W - 60) / len(bo)
         for i, o in enumerate(bo):
             nome, val, var = o[0], o[1], o[2]
             dec = o[3] if len(o) > 3 else 0
             cx = 30 + i * colw + colw / 2
-            text(d, (cx, 952), nome, font(18, True), anchor="ma")
+            text(d, (cx, 928), nome, font(24, True), anchor="ma")
             if val is None:
-                text(d, (cx, 976), "n.d.", font(24), fill=90, anchor="ma")
+                text(d, (cx, 970), "n.d.", font(30), fill=90, anchor="ma")
             else:
                 v = ("{:,.%df}" % dec).format(val)
                 v = v.replace(",", "X").replace(".", ",").replace("X", ".")
                 freccia = "+" if var >= 0 else "-"
-                text(d, (cx, 974), v, font(22), anchor="ma")
-                text(d, (cx, 997), "%s%.2f%%" % (freccia, abs(var)) if False else ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ","), font(20, True), fill=40, anchor="ma")
+                text(d, (cx, 958), v, font(32), anchor="ma")
+                text(d, (cx, 992), ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ","), font(28, True), anchor="ma")
     return im.resize((W, H), Image.LANCZOS)
 
 
