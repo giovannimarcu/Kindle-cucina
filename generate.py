@@ -137,9 +137,10 @@ def _yahoo(sym):
     with urllib.request.urlopen(req, timeout=20) as r:
         m = json.load(r)["chart"]["result"][0]
     closes = [c for c in m["indicators"]["quote"][0]["close"] if c is not None]
-    ultimo = m["meta"].get("regularMarketPrice") or closes[-1]
-    prec = m["meta"].get("chartPreviousClose") or (closes[-2] if len(closes) > 1 else None)
-    return ultimo, prec
+    # ultima chiusura contro la precedente (mai chartPreviousClose, che con range 5d e di 5 giorni fa)
+    if len(closes) < 2:
+        raise ValueError("serie troppo corta")
+    return closes[-1], closes[-2]
 
 
 def _stooq(sym):
