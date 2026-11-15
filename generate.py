@@ -126,6 +126,53 @@ def treni():
     return out
 
 
+# ---------------- borsa ----------------
+INDICI = [("FTSE MIB", "FTSEMIB.MI", "^fmib", 0), ("S&P 500", "^GSPC", "^spx", 0),
+          ("Nasdaq", "^IXIC", "^ndq", 0), ("EUR/USD", "EURUSD=X", "eurusd", 4)]
+
+
+def _yahoo(sym):
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/%s?range=5d&interval=1d" % urllib.request.quote(sym)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        m = json.load(r)["chart"]["result"][0]
+    closes = [c for c in m["indicators"]["quote"][0]["close"] if c is not None]
+    ultimo = m["meta"].get("regularMarketPrice") or closes[-1]
+    prec = m["meta"].get("chartPreviousClose") or (closes[-2] if len(closes) > 1 else None)
+    return ultimo, prec
+
+
+def _stooq(sym):
+    url = "https://stooq.com/q/d/l/?s=%s&i=d" % urllib.request.quote(sym)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        righe = r.read().decode().strip().splitlines()
+    c = [float(x.split(",")[4]) for x in righe[1:] if x.count(",") >= 4]
+    return c[-1], c[-2]
+
+
+def borsa():
+    """Lista di (nome, valore, variazione %) oppure None. Ogni indice e indipendente."""
+    if os.environ.get("DEMO"):
+        return [("FTSE MIB", 43210, 0.62, 0), ("S&P 500", 6850, -0.31, 0), ("Nasdaq", 23400, 0.12, 0), ("EUR/USD", 1.1580, -0.08, 4)]
+    out = []
+    for nome, ys, ss, dec in INDICI:
+        ris = None
+        for fn, sym in ((_yahoo, ys), (_stooq, ss)):
+            try:
+                ris = fn(sym)
+                if ris and ris[0] and ris[1]:
+                    break
+            except Exception as e:
+                print("borsa %s via %s non disponibile: %s" % (nome, fn.__name__, e))
+                ris = None
+        if ris and ris[0] and ris[1]:
+            out.append((nome, ris[0], (ris[0] / ris[1] - 1) * 100, dec))
+        else:
+            out.append((nome, None, None, dec))
+    return out if any(o[1] for o in out) else None
+
+
 def desc(code):
     if code == 0: return "Sereno", "sun"
     if code in (1, 2): return "Poco nuvoloso", "partly"
@@ -286,7 +333,7 @@ def hline(d, y, x0=30, x1=W - 30, w=2, fill=0):
     d.line([x0 * S, y * S, x1 * S, y * S], fill=fill, width=int(w * S))
 
 
-def render(wx, tr, now):
+def render(wx, tr, now, bo=None):
     im = Image.new("L", (W * S, H * S), 255)
     d = ImageDraw.Draw(im)
     # intestazione
@@ -326,13 +373,13 @@ def render(wx, tr, now):
     hline(d, 645, w=4)
     # treni
     text(d, (30, 662), "Treni da Treviglio", font(30, True))
-    y = 712
+    y = 706
     if tr is None:
         text(d, (30, y), "Dati treni non disponibili", font(28), fill=70)
     elif not tr:
         text(d, (30, y), "Nessun treno in partenza", font(28), fill=70)
     else:
-        for t in tr[:5]:
+        for t in tr[:4]:
             text(d, (30, y), t["ora"], font(30, True))
             dest = t["dest"].title()
             dest = dest if len(dest) <= 19 else dest[:18] + "."
@@ -347,8 +394,25 @@ def render(wx, tr, now):
             elif not t["sopp"]:
                 nota += ("   " if nota else "") + "in orario"
             text(d, (140, y + 32), nota, font(18), fill=70)
-            hline(d, y + 56, w=1, fill=150)
-            y += 60
+            hline(d, y + 54, w=1, fill=150)
+            y += 58
+    # borsa
+    if bo:
+        hline(d, 944, w=4)
+        colw = (W - 60) / len(bo)
+        for i, o in enumerate(bo):
+            nome, val, var = o[0], o[1], o[2]
+            dec = o[3] if len(o) > 3 else 0
+            cx = 30 + i * colw + colw / 2
+            text(d, (cx, 952), nome, font(18, True), anchor="ma")
+            if val is None:
+                text(d, (cx, 976), "n.d.", font(24), fill=90, anchor="ma")
+            else:
+                v = ("{:,.%df}" % dec).format(val)
+                v = v.replace(",", "X").replace(".", ",").replace("X", ".")
+                freccia = "+" if var >= 0 else "-"
+                text(d, (cx, 974), v, font(22), anchor="ma")
+                text(d, (cx, 997), "%s%.2f%%" % (freccia, abs(var)) if False else ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ","), font(20, True), fill=40, anchor="ma")
     return im.resize((W, H), Image.LANCZOS)
 
 
@@ -418,7 +482,7 @@ def main():
     out = sys.argv[1] if len(sys.argv) > 1 else HERE
     os.makedirs(out, exist_ok=True)
     now = datetime.now(TZ)
-    im = render(weather(), treni(), now).convert("L")
+    im = render(weather(), treni(), now, borsa()).convert("L")
     # solo grigi 8 bit, nessun canale alpha
     path = os.path.join(out, "kindle.png")
     im.save(path, optimize=True)
