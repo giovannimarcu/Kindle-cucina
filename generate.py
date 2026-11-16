@@ -34,11 +34,12 @@ def weather():
                           "temperature_2m_min": [7.2, 8.0, 5.1], "precipitation_probability_max": [10, 80, 0]},
                 "hourly": {"time": ["2026-11-04T%02d:00" % h for h in range(24)] + ["2026-11-05T%02d:00" % h for h in range(24)],
                            "precipitation_probability": [0]*14 + [60, 70, 80, 70, 20, 0, 0, 0, 0, 0] + [0]*24,
-                           "precipitation": [0]*14 + [0.4, 0.8, 1.2, 0.5, 0, 0, 0, 0, 0, 0] + [0]*24}}
+                           "precipitation": [0]*14 + [0.4, 0.8, 1.2, 0.5, 0, 0, 0, 0, 0, 0] + [0]*24,
+                           "weather_code": [3]*14 + [61]*4 + [3]*6 + [3]*12 + [0]*12}}
     url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
            "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
            "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-           "&hourly=precipitation_probability,precipitation"
+           "&hourly=precipitation_probability,precipitation,weather_code"
            "&timezone=%s&forecast_days=3" % (CFG["lat"], CFG["lon"], CFG["timezone"].replace("/", "%2F")))
     try:
         return get_json(url)
@@ -136,11 +137,19 @@ def _yahoo(sym):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=20) as r:
         m = json.load(r)["chart"]["result"][0]
-    closes = [c for c in m["indicators"]["quote"][0]["close"] if c is not None]
+    ts = m.get("timestamp") or []
+    cl = m["indicators"]["quote"][0]["close"]
+    coppie = [(t, c) for t, c in zip(ts, cl) if c is not None]
+    closes = [c for _, c in coppie]
+    global _ULTIMA
+    _ULTIMA = datetime.fromtimestamp(coppie[-1][0], TZ).date() if coppie else None
     # ultima chiusura contro la precedente (mai chartPreviousClose, che con range 5d e di 5 giorni fa)
     if len(closes) < 2:
         raise ValueError("serie troppo corta")
     return closes[-1], closes[-2]
+
+
+_ULTIMA = None
 
 
 def _stooq(sym):
@@ -148,17 +157,22 @@ def _stooq(sym):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=20) as r:
         righe = r.read().decode().strip().splitlines()
-    c = [float(x.split(",")[4]) for x in righe[1:] if x.count(",") >= 4]
+    ok = [x.split(",") for x in righe[1:] if x.count(",") >= 4]
+    global _ULTIMA
+    _ULTIMA = datetime.fromisoformat(ok[-1][0]).date()
+    c = [float(x[4]) for x in ok]
     return c[-1], c[-2]
 
 
 def borsa():
     """Lista di (nome, valore, variazione %) oppure None. Ogni indice e indipendente."""
     if os.environ.get("DEMO"):
-        return [("FTSE MIB", 43210, 0.62, 0), ("S&P 500", 6850, -0.31, 0), ("Nasdaq", 23400, 0.12, 0), ("EUR/USD", 1.1580, -0.08, 4)]
+        return [("FTSE MIB", 43210, 0.62, 0, "oggi"), ("S&P 500", 6850, -0.31, 0, "ven"), ("Nasdaq", 23400, 0.12, 0, "ven"), ("EUR/USD", 1.1580, -0.08, 4, "oggi")]
+    global _ULTIMA
     out = []
     for nome, ys, ss, dec in INDICI:
         ris = None
+        _ULTIMA = None
         for fn, sym in ((_yahoo, ys), (_stooq, ss)):
             try:
                 ris = fn(sym)
@@ -168,10 +182,51 @@ def borsa():
                 print("borsa %s via %s non disponibile: %s" % (nome, fn.__name__, e))
                 ris = None
         if ris and ris[0] and ris[1]:
-            out.append((nome, ris[0], (ris[0] / ris[1] - 1) * 100, dec))
+            u = _ULTIMA
+            oggi = datetime.now(TZ).date()
+            lab = "oggi" if (u is None or u == oggi) else GIORNI[u.weekday()]
+            out.append((nome, ris[0], (ris[0] / ris[1] - 1) * 100, dec, lab))
         else:
-            out.append((nome, None, None, dec))
+            out.append((nome, None, None, dec, ""))
     return out if any(o[1] for o in out) else None
+
+
+def giorno_prev(wx, i, now):
+    """Icona e probabilita di pioggia per il giorno i, guardando le ore diurne (7 to 21);
+    per oggi solo le ore che restano. Evita che una nebbia del mattino o una pioggia
+    gia passata decidano l'icona di tutta la giornata."""
+    dd, h = wx["daily"], wx.get("hourly") or {}
+    giorno = dd["time"][i]
+    adesso = now.replace(tzinfo=None, minute=0, second=0, microsecond=0)
+    prob, codici = [], []
+    for k, t in enumerate(h.get("time", [])):
+        if not t.startswith(giorno):
+            continue
+        dt = datetime.fromisoformat(t)
+        if not (7 <= dt.hour <= 21) or dt < adesso:
+            continue
+        try:
+            prob.append(h["precipitation_probability"][k] or 0)
+            codici.append(h["weather_code"][k])
+        except Exception:
+            pass
+    if not codici:  # niente ore utili (es. sera tardi): uso il dato giornaliero
+        p = dd["precipitation_probability_max"][i] or 0
+        _, kd = desc(dd["weather_code"][i])
+        if kd in ("rain", "storm") and p < 40:
+            kd = "cloud"
+        return kd, p
+    pmax = max(prob) if prob else 0
+    if pmax >= 40:
+        kd = "storm" if any(c >= 95 for c in codici) else ("snow" if any(desc(c)[1] == "snow" for c in codici) else "rain")
+        return kd, pmax
+    conta = {}
+    for c in codici:
+        k2 = desc(c)[1]
+        if k2 in ("rain", "storm"):
+            k2 = "cloud"
+        conta[k2] = conta.get(k2, 0) + 1
+    return max(conta, key=conta.get), pmax
 
 
 def desc(code):
@@ -361,14 +416,12 @@ def render(wx, tr, now, bo=None):
         for i in range(3):
             x0 = 30 + i * colw
             label = "Oggi" if i == 0 else GIORNI[datetime.fromisoformat(dd["time"][i]).weekday()].capitalize()
-            _, kd = desc(dd["weather_code"][i])
-            if kd in ("rain", "storm") and (dd["precipitation_probability_max"][i] or 0) < 40:
-                kd = "cloud"
+            kd, pr = giorno_prev(wx, i, now)
             text(d, (x0 + colw / 2, 382), label, font(26, True), anchor="ma")
             icon(d, kd, x0 + colw / 2, 445, 32)
             text(d, (x0 + colw / 2, 489), "%d° / %d°" % (round(dd["temperature_2m_max"][i]), round(dd["temperature_2m_min"][i])),
                  font(26), anchor="ma")
-            text(d, (x0 + colw / 2, 523), "pioggia %d%%" % (dd["precipitation_probability_max"][i] or 0), font(20), fill=70, anchor="ma")
+            text(d, (x0 + colw / 2, 523), "pioggia %d%%" % pr, font(20), fill=70, anchor="ma")
     else:
         text(d, (30, 200), "Meteo non disponibile", font(36))
     hline(d, 563, w=4)
@@ -413,7 +466,15 @@ def render(wx, tr, now, bo=None):
                 v = v.replace(",", "X").replace(".", ",").replace("X", ".")
                 freccia = "+" if var >= 0 else "-"
                 text(d, (cx, 934), v, font(32), anchor="ma")
-                text(d, (cx, 970), ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ","), font(28, True), anchor="ma")
+                pc = ("%s%.2f%%" % ("+" if var >= 0 else "−", abs(var))).replace(".", ",")
+                lab = o[4] if len(o) > 4 else ""
+                f1, f2 = font(28, True), font(18)
+                w1 = f1.getlength(pc) / S
+                w2 = (f2.getlength(" " + lab) / S) if lab else 0
+                x0 = cx - (w1 + w2) / 2
+                text(d, (x0, 970), pc, f1)
+                if lab:
+                    text(d, (x0 + w1, 980), " " + lab, f2, fill=90)
     return im.resize((W, H), Image.LANCZOS)
 
 
